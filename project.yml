@@ -10,16 +10,15 @@ packages:
   Down:
     url: https://github.com/johnxnguyen/Down
     from: 0.11.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.9.0
 targets:
   Clearance:
     type: application
     platform: macOS
     sources:
       - path: Clearance
-        excludes:
-          - Resources/Assets.xcassets
-    resources:
-      - path: Clearance/Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jesse.Clearance
@@ -27,9 +26,12 @@ targets:
         SWIFT_VERSION: 6.0
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SPARKLE_FEED_URL: ""
+        SPARKLE_PUBLIC_ED_KEY: ""
     dependencies:
       - package: Yams
       - package: Down
+      - package: Sparkle
   ClearanceTests:
     type: bundle.unit-test
     platform: macOS
