@@ -1,5 +1,7 @@
 # Clearance
 
+![Clearance Icon](assets/branding/clearance-app-icon.svg)
+
 Clearance is a native macOS Markdown workspace focused on YAML-frontmatter Markdown files.
 
 ## Current V1 Capabilities
