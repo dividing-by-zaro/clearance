@@ -78,6 +78,7 @@ struct CodeMirrorEditorView: NSViewRepresentable {
         context.coordinator.isSyncingFromBinding = false
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CodeMirrorEditorView
         weak var textView: EditorTextView?
@@ -114,7 +115,7 @@ struct CodeMirrorEditorView: NSViewRepresentable {
 }
 
 final class EditorTextView: NSTextView {
-    var onAppearanceDidChange: (() -> Void)?
+    var onAppearanceDidChange: (@MainActor () -> Void)?
 
     private lazy var editorUndoManager: UndoManager = {
         let manager = UndoManager()

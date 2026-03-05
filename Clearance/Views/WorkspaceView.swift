@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
+import WebKit
 
 struct WorkspaceView: View {
     @StateObject private var viewModel: WorkspaceViewModel
+    @StateObject private var interactionState = WorkspaceInteractionState()
     @State private var isPopOutDropTargeted = false
     @State private var isOutlineVisible = true
+    @State private var renderedFindQuery = ""
+    @State private var isRenderedSearchPresented = false
     @State private var headingScrollSequence = 0
     @State private var headingScrollRequest: HeadingScrollRequest?
     private let popoutWindowController: PopoutWindowController
@@ -51,7 +55,21 @@ struct WorkspaceView: View {
                     .animation(.snappy(duration: 0.2), value: shouldShowOutline(for: parsed))
                 } else {
                     ContentUnavailableView {
-                        Label("Open a Markdown File", systemImage: "doc.text")
+                        Label {
+                            Text("Open a Markdown File")
+                        } icon: {
+                            Group {
+                                if let appIcon = NSApp.applicationIconImage {
+                                    Image(nsImage: appIcon)
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                } else {
+                                    Image(systemName: "doc.text")
+                                }
+                            }
+                        }
                     } description: {
                         Text("Choose a file from the sidebar, or open one directly.")
                     } actions: {
@@ -98,28 +116,30 @@ struct WorkspaceView: View {
         }
         .focusedSceneValue(\.workspaceCommandActions, WorkspaceCommandActions(
             openFile: { viewModel.promptAndOpenFile() },
-            toggleOutline: { if viewModel.activeSession != nil { isOutlineVisible.toggle() } },
+            toggleOutline: { if canShowOutlineControls { isOutlineVisible.toggle() } },
             showViewMode: { if viewModel.activeSession != nil { viewModel.mode = .view } },
             showEditMode: { if viewModel.activeSession != nil { viewModel.mode = .edit } },
             openInNewWindow: { popOutActiveSession() },
             findInDocument: { performFindInDocument() },
+            findPreviousInDocument: { performFindPreviousInDocument() },
             printDocument: { performPrint() },
             hasActiveSession: viewModel.activeSession != nil,
             hasVisibleOutline: isOutlineVisible,
-            canShowOutline: viewModel.mode == .view && !(viewModel.activeSession.map { FrontmatterParser().parse(markdown: $0.content).headings.isEmpty } ?? true)
+            canShowOutline: canShowOutlineControls
         ))
         .toolbarRole(.editor)
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    isOutlineVisible.toggle()
-                } label: {
-                    Label(
-                        isOutlineVisible ? "Hide Outline" : "Show Outline",
-                        systemImage: "sidebar.right"
-                    )
+            if canShowOutlineControls {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        isOutlineVisible.toggle()
+                    } label: {
+                        Label(
+                            isOutlineVisible ? "Hide Outline" : "Show Outline",
+                            systemImage: "sidebar.right"
+                        )
+                    }
                 }
-                .disabled(viewModel.activeSession == nil)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -131,6 +151,27 @@ struct WorkspaceView: View {
                     )
                 }
                 .disabled(viewModel.activeSession == nil)
+            }
+        }
+        .searchable(
+            text: $renderedFindQuery,
+            isPresented: $isRenderedSearchPresented,
+            placement: .toolbar,
+            prompt: "Find In Document"
+        )
+        .onSubmit(of: .search) {
+            if viewModel.mode == .view {
+                performRenderedSearch(for: renderedFindQuery, backwards: false)
+            }
+        }
+        .onChange(of: renderedFindQuery) { _, newValue in
+            if viewModel.mode == .view {
+                performRenderedSearch(for: newValue, backwards: false)
+            }
+        }
+        .onChange(of: viewModel.mode) { _, mode in
+            if mode != .view {
+                isRenderedSearchPresented = false
             }
         }
         .onChange(of: viewModel.activeSession?.id) { _, _ in
@@ -211,7 +252,25 @@ struct WorkspaceView: View {
         isOutlineVisible && viewModel.mode == .view && !parsed.headings.isEmpty
     }
 
+    private var canShowOutlineControls: Bool {
+        guard viewModel.mode == .view,
+              let session = viewModel.activeSession else {
+            return false
+        }
+
+        let parsed = FrontmatterParser().parse(markdown: session.content)
+        return !parsed.headings.isEmpty
+    }
+
     private func performFindInDocument() -> Bool {
+        if viewModel.mode == .view {
+            isRenderedSearchPresented = true
+            if !renderedFindQuery.isEmpty {
+                performRenderedSearch(for: renderedFindQuery, backwards: false)
+            }
+            return true
+        }
+
         let findMenuItem = NSMenuItem()
         findMenuItem.tag = NSTextFinder.Action.showFindInterface.rawValue
         if NSApp.sendAction(#selector(NSResponder.performTextFinderAction(_:)), to: nil, from: findMenuItem) {
@@ -223,8 +282,63 @@ struct WorkspaceView: View {
         return NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: legacyFindMenuItem)
     }
 
+    private func performFindPreviousInDocument() -> Bool {
+        if viewModel.mode == .view {
+            isRenderedSearchPresented = true
+            if !renderedFindQuery.isEmpty {
+                performRenderedSearch(for: renderedFindQuery, backwards: true)
+            }
+            return true
+        }
+
+        let findMenuItem = NSMenuItem()
+        findMenuItem.tag = NSTextFinder.Action.previousMatch.rawValue
+        return NSApp.sendAction(#selector(NSResponder.performTextFinderAction(_:)), to: nil, from: findMenuItem)
+    }
+
     private func performPrint() -> Bool {
-        NSApp.sendAction(#selector(NSView.printView(_:)), to: nil, from: nil)
+        guard let session = viewModel.activeSession else {
+            return false
+        }
+
+        let parsed = FrontmatterParser().parse(markdown: session.content)
+        let html = RenderedHTMLBuilder().build(document: parsed)
+        let state = interactionState
+        state.printJob = RenderedDocumentPrintJob(html: html) { [weak state] in
+            state?.printJob = nil
+        }
+        return true
+    }
+
+    private func activeRenderedWebView() -> WKWebView? {
+        guard let keyWindow = NSApp.keyWindow,
+              let contentView = keyWindow.contentView else {
+            return nil
+        }
+
+        return contentView.firstDescendant(ofType: WKWebView.self)
+    }
+
+    private func performRenderedSearch(for rawQuery: String, backwards: Bool) {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty,
+              let webView = activeRenderedWebView() else {
+            return
+        }
+
+        if #available(macOS 12.0, *) {
+            let configuration = WKFindConfiguration()
+            configuration.backwards = backwards
+            configuration.wraps = true
+            webView.find(query, configuration: configuration) { _ in }
+        } else {
+            let escapedQuery = query
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\r", with: "\\r")
+            webView.evaluateJavaScript("window.find(\"\(escapedQuery)\", false, \(backwards ? "true" : "false"), true, false, false, false);")
+        }
     }
 }
 
@@ -260,5 +374,67 @@ struct MarkdownOutlineView: View {
             .listStyle(.sidebar)
         }
         .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+    }
+}
+
+private extension NSView {
+    func firstDescendant<T: NSView>(ofType type: T.Type) -> T? {
+        if let match = self as? T {
+            return match
+        }
+
+        for subview in subviews {
+            if let match = subview.firstDescendant(ofType: type) {
+                return match
+            }
+        }
+
+        return nil
+    }
+}
+
+@MainActor
+private final class WorkspaceInteractionState: ObservableObject {
+    var printJob: RenderedDocumentPrintJob?
+}
+
+@MainActor
+private final class RenderedDocumentPrintJob: NSObject, WKNavigationDelegate {
+    private let webView: WKWebView
+    private let completion: () -> Void
+    private var hasCompleted = false
+
+    init(html: String, completion: @escaping () -> Void) {
+        self.webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 960, height: 1200))
+        self.completion = completion
+        super.init()
+
+        webView.navigationDelegate = self
+        webView.loadHTMLString(html, baseURL: Bundle.main.bundleURL)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let printOperation = webView.printOperation(with: NSPrintInfo.shared)
+        printOperation.showsPrintPanel = true
+        printOperation.showsProgressPanel = true
+        _ = printOperation.run()
+        completeIfNeeded()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        completeIfNeeded()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        completeIfNeeded()
+    }
+
+    private func completeIfNeeded() {
+        guard !hasCompleted else {
+            return
+        }
+
+        hasCompleted = true
+        completion()
     }
 }
