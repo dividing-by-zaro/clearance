@@ -49,9 +49,10 @@ struct RecentFilesSidebar: View {
             }
             .listStyle(.sidebar)
             .animation(.snappy(duration: 0.26), value: entries.map { "\($0.path)|\($0.lastOpenedAt.timeIntervalSinceReferenceDate)" })
-
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             Divider()
-
             HStack(spacing: 8) {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(AppearancePreference.allCases) { choice in
@@ -69,9 +70,8 @@ struct RecentFilesSidebar: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .background(.bar)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .underPageBackgroundColor))
     }
 
     private var groupedEntries: [RecentFilesSection] {
