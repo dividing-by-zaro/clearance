@@ -59,12 +59,12 @@ struct RecentFilesSidebar: View {
 
         Divider()
 
-        Button("Show in Finder") {
+        Button("Reveal in Finder") {
             selectedPath = entry.path
             NSWorkspace.shared.activateFileViewerSelecting([entry.fileURL])
         }
 
-        Button("Copy Path") {
+        Button("Copy Path to File") {
             selectedPath = entry.path
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
