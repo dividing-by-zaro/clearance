@@ -29,6 +29,33 @@ final class MarkdownLinkRouterTests: XCTestCase {
         XCTAssertEqual(action, .openInApp(URL(fileURLWithPath: "/tmp/docs/notes.txt")))
     }
 
+    func testRemoteMarkdownLinksOpenInApp() {
+        let sourceURL = URL(string: "https://example.com/docs/root.md")
+        let requestedURL = URL(string: "https://example.com/docs/next.md")
+
+        let action = MarkdownLinkRouter.action(for: requestedURL, sourceDocumentURL: sourceURL)
+
+        XCTAssertEqual(action, .openInApp(URL(string: "https://example.com/docs/next.md")!))
+    }
+
+    func testRemoteDirectoryLinksOpenInApp() {
+        let sourceURL = URL(string: "https://example.com/docs/root.md")
+        let requestedURL = URL(string: "https://example.com/docs/guides")
+
+        let action = MarkdownLinkRouter.action(for: requestedURL, sourceDocumentURL: sourceURL)
+
+        XCTAssertEqual(action, .openInApp(URL(string: "https://example.com/docs/guides")!))
+    }
+
+    func testRemoteSameDocAnchorsAllowWebView() {
+        let sourceURL = URL(string: "https://example.com/docs/root.md")
+        let requestedURL = URL(string: "https://example.com/docs/root.md#overview")
+
+        let action = MarkdownLinkRouter.action(for: requestedURL, sourceDocumentURL: sourceURL)
+
+        XCTAssertEqual(action, .allowWebView)
+    }
+
     func testOpensWebLinksExternally() {
         let sourceURL = URL(fileURLWithPath: "/tmp/docs/root.md")
         let requestedURL = URL(string: "https://example.com/readme.md")
@@ -45,5 +72,14 @@ final class MarkdownLinkRouterTests: XCTestCase {
         let action = MarkdownLinkRouter.action(for: requestedURL, sourceDocumentURL: sourceURL)
 
         XCTAssertEqual(action, .openExternal(URL(fileURLWithPath: "/tmp/docs/image.png")))
+    }
+
+    func testJavascriptLinksAreBlockedFromExternalOpen() {
+        let sourceURL = URL(fileURLWithPath: "/tmp/docs/root.md")
+        let requestedURL = URL(string: "javascript:alert('hi')")
+
+        let action = MarkdownLinkRouter.action(for: requestedURL, sourceDocumentURL: sourceURL)
+
+        XCTAssertEqual(action, .allowWebView)
     }
 }

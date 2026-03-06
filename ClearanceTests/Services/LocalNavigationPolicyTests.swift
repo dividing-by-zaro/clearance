@@ -8,8 +8,12 @@ final class LocalNavigationPolicyTests: XCTestCase {
         XCTAssertTrue(LocalNavigationPolicy.allows(URL(string: "file:///tmp/doc.md")))
     }
 
-    func testBlocksNetworkSchemes() {
-        XCTAssertFalse(LocalNavigationPolicy.allows(URL(string: "https://example.com")))
-        XCTAssertFalse(LocalNavigationPolicy.allows(URL(string: "http://example.com")))
+    func testAllowsHTTPAndHTTPSForProgrammaticLoads() {
+        XCTAssertTrue(LocalNavigationPolicy.allows(URL(string: "https://example.com")))
+        XCTAssertTrue(LocalNavigationPolicy.allows(URL(string: "http://example.com")))
+    }
+
+    func testBlocksJavascriptScheme() {
+        XCTAssertFalse(LocalNavigationPolicy.allows(URL(string: "javascript:alert('hi')")))
     }
 }
