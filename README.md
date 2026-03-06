@@ -23,6 +23,8 @@ For developer setup, build, release, and CI details, see [docs/DEVELOPMENT.md](d
 - Open selected files in new windows.
 - Follow Markdown links to local files or web URLs.
 - Auto-save while editing.
+- Bold (`⌘B`) and italic (`⌘I`) formatting shortcuts in Edit mode, with word-aware toggling.
+- Automatic list continuation: pressing Enter on a list item continues the list; pressing Enter on an empty list item ends it.
 
 ## Keyboard Shortcuts
 
@@ -31,6 +33,8 @@ For developer setup, build, release, and CI details, see [docs/DEVELOPMENT.md](d
 - `⌘F`: Find in document
 - `⇧⌘F`: Find previous match
 - `⌘P`: Print (rendered output)
+- `⌘B`: Bold (Edit mode)
+- `⌘I`: Italic (Edit mode)
 - `⌘Z`: Undo (Edit mode)
 - `⇧⌘Z`: Redo (Edit mode)
 - `⌘1`: View mode

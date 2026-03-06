@@ -156,12 +156,141 @@ final class EditorTextView: NSTextView {
             return
         }
 
+        if handleFormattingShortcut(event) {
+            return
+        }
+
         super.keyDown(with: event)
+    }
+
+    private static let emptyListItemRegex = try! NSRegularExpression(pattern: "^\\s*(?:[-*+]|\\d+\\.)\\s*$")
+
+    override func insertNewline(_ sender: Any?) {
+        let text = string as NSString
+        let selectedRange = self.selectedRange()
+        let lineRange = text.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+        let currentLine = text.substring(with: lineRange)
+        let trimmedLine = currentLine.trimmingCharacters(in: .newlines)
+
+        // Empty list item (just marker, no content) — clear the marker, stay on same line
+        let trimmedRange = NSRange(location: 0, length: (trimmedLine as NSString).length)
+        if Self.emptyListItemRegex.firstMatch(in: trimmedLine, range: trimmedRange) != nil {
+            // Replace the line content with empty string (removes the marker)
+            let contentRange = NSRange(location: lineRange.location, length: (trimmedLine as NSString).length)
+            insertText("", replacementRange: contentRange)
+            return
+        }
+
+        if let continuation = listContinuation(for: trimmedLine) {
+            super.insertNewline(sender)
+            insertText(continuation, replacementRange: self.selectedRange())
+            return
+        }
+
+        super.insertNewline(sender)
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         onAppearanceDidChange?()
+    }
+
+    private func handleFormattingShortcut(_ event: NSEvent) -> Bool {
+        guard let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return false
+        }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == [.command] else {
+            return false
+        }
+
+        switch key {
+        case "b":
+            wrapSelection(with: "**")
+            return true
+        case "i":
+            wrapSelection(with: "*")
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func wrapSelection(with marker: String) {
+        var range = selectedRange()
+
+        // No selection — expand to the word under the cursor
+        if range.length == 0 {
+            let wordRange = selectionRange(forProposedRange: range, granularity: .selectByWord)
+            if wordRange.length > 0 {
+                range = wordRange
+            }
+        }
+
+        let nsString = string as NSString
+
+        // Strip trailing newline from selection so markers stay on the same line
+        if range.length > 0 && nsString.substring(with: NSRange(location: range.location + range.length - 1, length: 1)) == "\n" {
+            range = NSRange(location: range.location, length: range.length - 1)
+        }
+
+        let selected = nsString.substring(with: range)
+
+        // If already wrapped, unwrap
+        if selected.hasPrefix(marker) && selected.hasSuffix(marker) && selected.count >= marker.count * 2 {
+            let start = selected.index(selected.startIndex, offsetBy: marker.count)
+            let end = selected.index(selected.endIndex, offsetBy: -marker.count)
+            let unwrapped = String(selected[start..<end])
+            insertText(unwrapped, replacementRange: range)
+            setSelectedRange(NSRange(location: range.location, length: unwrapped.utf16.count))
+            return
+        }
+
+        // Check if surrounding text already has markers (cursor inside formatted word)
+        let before = range.location >= marker.count
+            ? nsString.substring(with: NSRange(location: range.location - marker.count, length: marker.count))
+            : ""
+        let afterEnd = range.location + range.length
+        let after = afterEnd + marker.count <= nsString.length
+            ? nsString.substring(with: NSRange(location: afterEnd, length: marker.count))
+            : ""
+
+        if before == marker && after == marker {
+            let expandedRange = NSRange(location: range.location - marker.count, length: range.length + marker.count * 2)
+            let inner = nsString.substring(with: range)
+            insertText(inner, replacementRange: expandedRange)
+            setSelectedRange(NSRange(location: expandedRange.location, length: inner.utf16.count))
+            return
+        }
+
+        let wrapped = "\(marker)\(selected)\(marker)"
+        insertText(wrapped, replacementRange: range)
+        setSelectedRange(NSRange(location: range.location + marker.count, length: range.length))
+    }
+
+    private static let unorderedListRegex = try! NSRegularExpression(pattern: "^(\\s*)([-*+]) (.+)")
+    private static let orderedListRegex = try! NSRegularExpression(pattern: "^(\\s*)(\\d+)\\. (.+)")
+
+    private func listContinuation(for line: String) -> String? {
+        let nsLine = line as NSString
+        let lineRange = NSRange(location: 0, length: nsLine.length)
+
+        // Unordered list: "  - text", "  * text", "  + text"
+        if let match = Self.unorderedListRegex.firstMatch(in: line, range: lineRange) {
+            let indent = nsLine.substring(with: match.range(at: 1))
+            let marker = nsLine.substring(with: match.range(at: 2))
+            return "\(indent)\(marker) "
+        }
+
+        // Ordered list: "  1. text"
+        if let match = Self.orderedListRegex.firstMatch(in: line, range: lineRange) {
+            let indent = nsLine.substring(with: match.range(at: 1))
+            let num = Int(nsLine.substring(with: match.range(at: 2)))!
+            return "\(indent)\(num + 1). "
+        }
+
+        return nil
     }
 
     private func handleUndoShortcut(_ event: NSEvent) -> Bool {
