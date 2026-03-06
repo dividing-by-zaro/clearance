@@ -50,8 +50,13 @@ struct CodeMirrorEditorView: NSViewRepresentable {
                 return
             }
 
-            coordinator.applyTheme(to: textView)
-            coordinator.highlighter.apply(to: textView)
+            // Reset tracked state so applyThemeIfNeeded detects the appearance change
+            coordinator.lastResolvedIsDark = nil
+            let changed = coordinator.applyThemeIfNeeded(to: textView)
+            if changed {
+                coordinator.highlighter.forceNextApply()
+                coordinator.highlighter.apply(to: textView)
+            }
         }
 
         scrollView.documentView = textView
@@ -65,8 +70,11 @@ struct CodeMirrorEditorView: NSViewRepresentable {
             return
         }
 
-        context.coordinator.applyTheme(to: textView)
-        context.coordinator.highlighter.apply(to: textView)
+        let themeChanged = context.coordinator.applyThemeIfNeeded(to: textView)
+        if themeChanged {
+            context.coordinator.highlighter.forceNextApply()
+            context.coordinator.highlighter.apply(to: textView)
+        }
 
         guard textView.string != text else {
             return
@@ -76,6 +84,7 @@ struct CodeMirrorEditorView: NSViewRepresentable {
 
         let oldSelection = textView.selectedRange()
         textView.string = text
+        context.coordinator.highlighter.forceNextApply()
         context.coordinator.highlighter.apply(to: textView)
 
         let maxLength = (textView.string as NSString).length
@@ -92,6 +101,9 @@ struct CodeMirrorEditorView: NSViewRepresentable {
         weak var textView: EditorTextView?
         let highlighter = MarkdownSyntaxHighlighter()
         var isSyncingFromBinding = false
+        var lastAppliedTheme: AppTheme?
+        var lastAppliedAppearance: AppearancePreference?
+        var lastResolvedIsDark: Bool?
 
         init(parent: CodeMirrorEditorView) {
             self.parent = parent
@@ -108,6 +120,23 @@ struct CodeMirrorEditorView: NSViewRepresentable {
             if parent.text != latest {
                 parent.text = latest
             }
+        }
+
+        /// Returns true if the theme was actually changed.
+        @discardableResult
+        func applyThemeIfNeeded(to textView: NSTextView) -> Bool {
+            let currentIsDark = textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            guard parent.theme != lastAppliedTheme
+                    || parent.appearance != lastAppliedAppearance
+                    || currentIsDark != lastResolvedIsDark else {
+                return false
+            }
+
+            applyTheme(to: textView)
+            lastAppliedTheme = parent.theme
+            lastAppliedAppearance = parent.appearance
+            lastResolvedIsDark = currentIsDark
+            return true
         }
 
         func applyTheme(to textView: NSTextView) {
@@ -341,10 +370,27 @@ final class MarkdownSyntaxHighlighter {
         palette = newPalette
     }
 
+    private var lastHighlightedHash: Int?
+
+    func forceNextApply() {
+        lastHighlightedHash = nil
+    }
+
     func apply(to textView: NSTextView) {
         guard let storage = textView.textStorage else {
             return
         }
+
+        let currentHash = storage.string.hashValue
+        guard currentHash != lastHighlightedHash else {
+            return
+        }
+        lastHighlightedHash = currentHash
+
+        // Save scroll position — attribute changes (especially font size for headings)
+        // cause NSLayoutManager to recalculate line heights, which shifts the scroll.
+        let scrollView = textView.enclosingScrollView
+        let savedScrollOrigin = scrollView?.contentView.bounds.origin
 
         let fullRange = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
@@ -393,6 +439,12 @@ final class MarkdownSyntaxHighlighter {
 
         storage.endEditing()
         textView.typingAttributes = baseAttributes
+
+        // Restore scroll position after layout recalculation
+        if let savedScrollOrigin, let scrollView {
+            scrollView.contentView.scroll(to: savedScrollOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {

@@ -11,6 +11,7 @@ final class DocumentSession: ObservableObject, Identifiable {
             }
 
             isDirty = true
+            cachedParsedDocument = nil
             scheduleAutosave()
         }
     }
@@ -23,6 +24,17 @@ final class DocumentSession: ObservableObject, Identifiable {
     private var pendingAutosave: DispatchWorkItem?
     private var lastKnownDiskText: String
     private var isLoaded = false
+    private var cachedParsedDocument: ParsedMarkdownDocument?
+    private let frontmatterParser = FrontmatterParser()
+
+    var parsedDocument: ParsedMarkdownDocument {
+        if let cached = cachedParsedDocument {
+            return cached
+        }
+        let parsed = frontmatterParser.parse(markdown: content)
+        cachedParsedDocument = parsed
+        return parsed
+    }
 
     init(url: URL, fileIO: FileIO = .live, autosaveDelay: TimeInterval = 0.5) throws {
         self.url = url

@@ -40,7 +40,7 @@ struct WorkspaceView: View {
         } detail: {
             Group {
                 if let session = viewModel.activeSession {
-                    let parsed = FrontmatterParser().parse(markdown: session.content)
+                    let parsed = session.parsedDocument
                     OutlineSplitView(showsInspector: shouldShowOutline(for: parsed)) {
                         DocumentSurfaceView(
                             session: session,

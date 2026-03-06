@@ -40,6 +40,10 @@ For developer setup, build, release, and CI details, see [docs/DEVELOPMENT.md](d
 - `⌘1`: View mode
 - `⌘2`: Edit mode
 
+## Known Issues
+
+- **Slight scroll jitter in Edit mode**: Typing near headings can cause a subtle vertical shift. This is caused by the full-document syntax highlighter resetting and reapplying font attributes (headings use larger font sizes), which triggers NSLayoutManager to recalculate line heights on every keystroke. A proper fix requires incremental (range-based) highlighting.
+
 ## Privacy and Runtime Behavior
 
 - Clearance is fully local at runtime for normal editing and rendering.
