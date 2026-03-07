@@ -188,16 +188,6 @@ struct WorkspaceView: View {
                 .disabled(!viewModel.canNavigateForward)
             }
 
-            ToolbarItem(id: "clearance.address", placement: .navigation) {
-                AddressBarView(
-                    activeURL: viewModel.activeDocumentURL,
-                    isLoading: viewModel.isLoadingRemoteDocument
-                ) { rawValue in
-                    openDocumentFromAddressBar(rawValue)
-                }
-                .toolbarDebugFrame(enabled: showToolbarLayoutDebug, color: .blue)
-            }
-
             ToolbarItem(id: "clearance.mode", placement: .primaryAction) {
                 if viewModel.activeSession != nil {
                     Picker("", selection: $viewModel.mode) {
@@ -222,11 +212,7 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .background(WindowToolbarPriorityConfigurator(
-            activeURL: viewModel.activeDocumentURL,
-            isLoading: viewModel.isLoadingRemoteDocument,
-            onCommit: openDocumentFromAddressBar
-        ))
+        .background(WindowToolbarPriorityConfigurator())
         .searchable(
             text: $renderedFindQuery,
             isPresented: $isRenderedSearchPresented,
@@ -297,40 +283,6 @@ struct WorkspaceView: View {
         viewModel.open(url: url, recordNavigation: recordNavigation)
     }
 
-    private func openDocumentFromAddressBar(_ rawInput: String) {
-        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return
-        }
-
-        guard let url = parseAddressBarURL(trimmed) else {
-            viewModel.errorMessage = "Could not parse address: \(trimmed)"
-            return
-        }
-
-        _ = openDocument(url)
-    }
-
-    private func parseAddressBarURL(_ input: String) -> URL? {
-        if let url = URL(string: input),
-           let scheme = url.scheme,
-           !scheme.isEmpty {
-            return url
-        }
-
-        let expandedInput = (input as NSString).expandingTildeInPath
-        if input.hasPrefix("/") || input.hasPrefix("~") || input.hasPrefix(".") {
-            return URL(fileURLWithPath: expandedInput)
-        }
-
-        if !input.contains(" "),
-           let remoteURL = URL(string: "https://\(input)"),
-           remoteURL.host != nil {
-            return remoteURL
-        }
-
-        return URL(fileURLWithPath: expandedInput)
-    }
 
     private func popOut(entry: RecentFileEntry) {
         guard entry.fileURL.isFileURL else {
@@ -605,153 +557,36 @@ private extension View {
 }
 
 private struct WindowToolbarPriorityConfigurator: NSViewRepresentable {
-    let activeURL: URL?
-    let isLoading: Bool
-    let onCommit: (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
         DispatchQueue.main.async {
-            configureToolbar(from: view, coordinator: context.coordinator)
+            configureToolbar(from: view)
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
-            configureToolbar(from: nsView, coordinator: context.coordinator)
+            configureToolbar(from: nsView)
         }
     }
 
-    private func configureToolbar(from view: NSView, coordinator: Coordinator) {
+    private func configureToolbar(from view: NSView) {
         guard let window = view.window,
               let toolbar = window.toolbar else {
             return
         }
 
         window.titleVisibility = .hidden
-        installAddressToolbarItemIfNeeded(on: toolbar, coordinator: coordinator)
 
         for item in toolbar.items {
             switch item.itemIdentifier.rawValue {
             case "clearance.back", "clearance.forward", "clearance.mode", "clearance.outline":
                 item.visibilityPriority = .high
-            case "clearance.address":
-                item.visibilityPriority = .standard
-                configureAddressItem(item, coordinator: coordinator)
             default:
                 break
             }
         }
-    }
-
-    private func configureAddressItem(_ item: NSToolbarItem, coordinator: Coordinator) {
-        coordinator.addressBarController.update(
-            activeURL: activeURL,
-            isLoading: isLoading,
-            onCommit: onCommit
-        )
-        item.visibilityPriority = .standard
-    }
-
-    private func installAddressToolbarItemIfNeeded(on toolbar: NSToolbar, coordinator: Coordinator) {
-        let toolbarID = ObjectIdentifier(toolbar)
-
-        if !(toolbar.delegate is ToolbarDelegateProxy),
-           let originalDelegate = toolbar.delegate as? NSObject {
-            let proxy = ToolbarDelegateProxy(
-                originalDelegate: originalDelegate,
-                addressItemProvider: { coordinator.addressBarController.item }
-            )
-            coordinator.toolbarDelegateProxies[toolbarID] = proxy
-            toolbar.delegate = proxy
-        }
-
-        guard let addressIndex = toolbar.items.firstIndex(where: {
-            $0.itemIdentifier == AddressBarSearchToolbarController.itemIdentifier
-        }) else {
-            return
-        }
-
-        if toolbar.items[addressIndex] is NSSearchToolbarItem {
-            return
-        }
-
-        toolbar.removeItem(at: addressIndex)
-        toolbar.insertItem(
-            withItemIdentifier: AddressBarSearchToolbarController.itemIdentifier,
-            at: addressIndex
-        )
-    }
-
-    @MainActor
-    final class Coordinator {
-        let addressBarController = AddressBarSearchToolbarController()
-        var toolbarDelegateProxies: [ObjectIdentifier: ToolbarDelegateProxy] = [:]
-    }
-}
-
-private final class ToolbarDelegateProxy: NSObject, NSToolbarDelegate {
-    private let originalDelegate: NSObject
-    private let addressItemProvider: () -> NSToolbarItem
-
-    init(
-        originalDelegate: NSObject,
-        addressItemProvider: @escaping () -> NSToolbarItem
-    ) {
-        self.originalDelegate = originalDelegate
-        self.addressItemProvider = addressItemProvider
-    }
-
-    override func responds(to aSelector: Selector!) -> Bool {
-        super.responds(to: aSelector) || originalDelegate.responds(to: aSelector)
-    }
-
-    override func forwardingTarget(for aSelector: Selector!) -> Any? {
-        if originalDelegate.responds(to: aSelector) {
-            return originalDelegate
-        }
-
-        return super.forwardingTarget(for: aSelector)
-    }
-
-    func toolbar(
-        _ toolbar: NSToolbar,
-        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? {
-        if itemIdentifier == AddressBarSearchToolbarController.itemIdentifier {
-            return addressItemProvider()
-        }
-
-        let selector = #selector(
-            NSToolbarDelegate.toolbar(_:itemForItemIdentifier:willBeInsertedIntoToolbar:)
-        )
-
-        guard originalDelegate.responds(to: selector) else {
-            return nil
-        }
-
-        typealias Method = @convention(c) (
-            AnyObject,
-            Selector,
-            NSToolbar,
-            NSToolbarItem.Identifier,
-            Bool
-        ) -> NSToolbarItem?
-
-        let implementation = originalDelegate.method(for: selector)
-        return unsafeBitCast(implementation, to: Method.self)(
-            originalDelegate,
-            selector,
-            toolbar,
-            itemIdentifier,
-            flag
-        )
     }
 }
 
